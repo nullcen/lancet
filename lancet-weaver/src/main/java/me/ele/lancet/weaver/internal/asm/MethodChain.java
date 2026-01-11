@@ -87,30 +87,61 @@ public class MethodChain {
         head.createIfNeed(base, bitset, exs);
 
         MethodVisitor mv = cv.visitMethod(access, name, desc, null, exs);
-        node.accept(new MethodVisitor(Opcodes.ASM5, new AutoUnboxMethodVisitor(mv)) {
+        try {
+            // Manually process instructions to handle OP_CALL correctly
+            // MethodNode.accept may not handle OP_CALL (Integer.MAX_VALUE) correctly
+            mv.visitCode();
 
-            @Override
-            public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
-                if (opcode == AopMethodAdjuster.OP_CALL) {
-                    head.loadArgsAndInvoke(mv);
-                } else if (opcode == AopMethodAdjuster.OP_THIS_GET_FIELD) {
-                    dealField(Opcodes.GETFIELD, name, mv);
-                } else if (opcode == AopMethodAdjuster.OP_THIS_PUT_FIELD) {
-                    dealField(Opcodes.PUTFIELD, name, mv);
+            // Visit try-catch blocks before instructions
+            if (node.tryCatchBlocks != null) {
+                for (org.objectweb.asm.tree.TryCatchBlockNode tcb : node.tryCatchBlocks) {
+                    tcb.accept(mv);
+                }
+            }
+
+            AutoUnboxMethodVisitor autoUnboxMv = new AutoUnboxMethodVisitor(mv);
+            for (org.objectweb.asm.tree.AbstractInsnNode insn = node.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof org.objectweb.asm.tree.MethodInsnNode) {
+                    org.objectweb.asm.tree.MethodInsnNode methodInsn = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                    int opcode = methodInsn.getOpcode();
+                    // Check if this is Origin.callVoid() or Origin.call() by checking owner and name
+                    // This is more reliable than checking opcode, as opcode may have been corrupted
+                    if (methodInsn.owner.equals("me/ele/lancet/base/Origin") && 
+                        (methodInsn.name.equals("callVoid") || methodInsn.name.startsWith("call"))) {
+                        // This should have been converted to OP_CALL by AopMethodAdjuster, but if not, handle it
+                        if (opcode == AopMethodAdjuster.OP_CALL) {
+                            head.loadArgsAndInvoke(mv);
+                        } else {
+                            // If opcode is not OP_CALL, it means AopMethodAdjuster didn't process it
+                            // This shouldn't happen, but handle it gracefully
+//                            Log.tag("transform").w("Found Origin.call* but opcode is not OP_CALL: " + opcode + ", handling as OP_CALL");
+                            head.loadArgsAndInvoke(mv);
+                        }
+                    } else if (opcode == AopMethodAdjuster.OP_CALL) {
+                        // Handle OP_CALL directly - don't call accept() as MethodInsnNode.accept() 
+                        // may convert Integer.MAX_VALUE to invalid bytecode
+                        head.loadArgsAndInvoke(mv);
+                    } else if (opcode == AopMethodAdjuster.OP_THIS_GET_FIELD) {
+                        dealField(Opcodes.GETFIELD, methodInsn.name, mv);
+                    } else if (opcode == AopMethodAdjuster.OP_THIS_PUT_FIELD) {
+                        dealField(Opcodes.PUTFIELD, methodInsn.name, mv);
+                    } else {
+                        // For normal method calls, call visitMethodInsn directly instead of accept()
+                        // to avoid MethodInsnNode.accept() converting invalid opcodes
+                        autoUnboxMv.visitMethodInsn(opcode, methodInsn.owner, methodInsn.name, methodInsn.desc, methodInsn.itf);
+                    }
                 } else {
-                    super.visitMethodInsn(opcode, owner, name, desc, itf);
+                    // For non-method instructions, use accept() directly
+                    insn.accept(autoUnboxMv);
                 }
             }
-
-            @Override
-            public AnnotationVisitor visitParameterAnnotation(int parameter, String desc, boolean visible) {
-                if (CLASS_OF.equals(desc)) {
-                    return null;
-                }
-                return super.visitParameterAnnotation(parameter, desc, visible);
-            }
-
-        });
+            // Visit maxs and end
+            mv.visitMaxs(node.maxStack, node.maxLocals);
+            mv.visitEnd();
+        } catch (Throwable e) {
+            Log.tag("transform").e("Error in MethodChain.next for " + className + "." + name + " -> " + desc + ": " + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
+            throw e;
+        }
 
         headFromInsert(access, className, name, desc);
     }
@@ -219,7 +250,24 @@ public class MethodChain {
         }
 
         public void invoke(MethodVisitor mv) {
-            action().accept(mv);
+            AbstractInsnNode action = action();
+            // Don't use accept() for MethodInsnNode with invalid opcodes (OP_CALL, etc.)
+            // as it may convert them to invalid bytecode
+            if (action instanceof MethodInsnNode) {
+                MethodInsnNode methodInsn = (MethodInsnNode) action;
+                int opcode = methodInsn.getOpcode();
+                // Check if opcode is a valid ASM opcode (not OP_CALL, OP_THIS_GET_FIELD, etc.)
+                if (opcode >= Opcodes.NOP && opcode <= Opcodes.INVOKEDYNAMIC) {
+                    methodInsn.accept(mv);
+                } else {
+                    // For invalid opcodes, call visitMethodInsn directly
+                    // This should not happen for head.mn, but handle it gracefully
+                    Log.tag("transform").w("Invalid opcode in Invoker.invoke: " + opcode + ", calling visitMethodInsn directly");
+                    mv.visitMethodInsn(opcode, methodInsn.owner, methodInsn.name, methodInsn.desc, methodInsn.itf);
+                }
+            } else {
+                action.accept(mv);
+            }
         }
 
         public void loadArgsAndInvoke(MethodVisitor mv) {
@@ -282,8 +330,22 @@ public class MethodChain {
                 mv.visitVarInsn(t.getOpcode(Opcodes.ILOAD), index);
                 index += t.getSize();
             }
-            // action
-            action.accept(mv);
+            // action - handle invalid opcodes (OP_CALL, etc.) specially
+            if (action instanceof MethodInsnNode) {
+                MethodInsnNode methodInsn = (MethodInsnNode) action;
+                int opcode = methodInsn.getOpcode();
+                // Check if opcode is a valid ASM opcode (not OP_CALL, OP_THIS_GET_FIELD, etc.)
+                if (opcode >= Opcodes.NOP && opcode <= Opcodes.INVOKEDYNAMIC) {
+                    methodInsn.accept(mv);
+                } else {
+                    // For invalid opcodes, call visitMethodInsn directly
+                    // This should not happen for head.mn, but handle it gracefully
+                    Log.tag("transform").w("Invalid opcode in createMethod: " + opcode + ", calling visitMethodInsn directly");
+                    mv.visitMethodInsn(opcode, methodInsn.owner, methodInsn.name, methodInsn.desc, methodInsn.itf);
+                }
+            } else {
+                action.accept(mv);
+            }
 
             // ret
             Type ret = Type.getReturnType(desc);

@@ -83,16 +83,56 @@ public class ClassOfAnnoParser implements AnnoParser {
             Graph graph = locator.graph();
             Type origin = locator.getArgsType()[index];
             if (origin.getSort() != Type.OBJECT && origin.getSort() != Type.ARRAY) {
-                throw new IllegalArgumentException("@ClassOf 's origin type should be parent in value");
+                throw new IllegalArgumentException(
+                    String.format("@ClassOf parameter[%d]: origin type '%s' should be Object or Array type, but got '%s'",
+                        index, origin.getInternalName(), origin.getSort()));
             }
 
+            String typeInternalName = internalClassName(type);
+            String originInternalName = internalClassName(origin);
+
             if (type.getDimensions() == origin.getDimensions()) {
-                if (!graph.inherit(internalClassName(type), internalClassName(origin))) {
-                    throw new IllegalArgumentException("@ClassOf 's origin type should be parent in value");
+                // Check if type is a subclass of origin
+                boolean typeExists = graph.get(typeInternalName) != null;
+                boolean originExists = graph.get(originInternalName) != null;
+                
+                if (!typeExists || !originExists) {
+                    // If either class is not in graph (e.g., third-party library classes),
+                    // require origin to be java.lang.Object for type safety
+                    if (!"java/lang/Object".equals(originInternalName)) {
+                        if (!typeExists && !originExists) {
+                            throw new IllegalArgumentException(
+                                String.format("@ClassOf parameter[%d]: both type '%s' (from @ClassOf value) and origin type '%s' (parameter declaration) are not found in class graph. " +
+                                    "When using third-party classes, the parameter type must be java.lang.Object.",
+                                    index, typeInternalName.replace('/', '.'), originInternalName.replace('/', '.')));
+                        } else if (!typeExists) {
+                            throw new IllegalArgumentException(
+                                String.format("@ClassOf parameter[%d]: type '%s' (from @ClassOf value) is not found in class graph. " +
+                                    "When using third-party classes, the parameter type must be java.lang.Object.",
+                                    index, typeInternalName.replace('/', '.')));
+                        } else {
+                            throw new IllegalArgumentException(
+                                String.format("@ClassOf parameter[%d]: origin type '%s' (parameter declaration) is not found in class graph. " +
+                                    "Use java.lang.Object as the parameter type.",
+                                    index, originInternalName.replace('/', '.')));
+                        }
+                    }
+                    // If origin is Object, allow it (all classes inherit from Object)
+                } else {
+                    // Both classes exist in graph, verify inheritance relationship
+                    if (!graph.inherit(typeInternalName, originInternalName)) {
+                        throw new IllegalArgumentException(
+                            String.format("@ClassOf parameter[%d]: type '%s' (from @ClassOf value) is not a subclass of '%s' (parameter declaration). " +
+                                "The parameter type should be a parent class of the @ClassOf value.",
+                                index, typeInternalName.replace('/', '.'), originInternalName.replace('/', '.')));
+                    }
                 }
             } else {
+                // Different array dimensions, origin must be Object
                 if (origin.getSort() != Type.OBJECT || !"java/lang/Object".equals(origin.getInternalName())) {
-                    throw new IllegalArgumentException("@ClassOf 's origin type should be parent in value");
+                    throw new IllegalArgumentException(
+                        String.format("@ClassOf parameter[%d]: when array dimensions differ, origin type must be java.lang.Object, but got '%s'",
+                            index, originInternalName.replace('/', '.')));
                 }
             }
             locator.adjustTargetMethodArgs(index, type);

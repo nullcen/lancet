@@ -44,7 +44,7 @@ public class PreProcessClassVisitor extends ClassVisitor {
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
         entity.methods.add(new MethodEntity(access, name, desc));
         if (!isHookClass) {
-            return new MethodVisitor(Opcodes.ASM5) {
+            return new MethodVisitor(Opcodes.ASM9) {
                 @Override
                 public AnnotationVisitor visitAnnotation(String annoDesc, boolean visible) {
                     judge(annoDesc);
@@ -58,6 +58,7 @@ public class PreProcessClassVisitor extends ClassVisitor {
     private void judge(String desc) {
         if (!isHookClass && (INSERT.equals(desc) || PROXY.equals(desc) || TRY_CATCH.equals(desc))) {
             isHookClass = true;
+            me.ele.lancet.weaver.internal.log.Log.tag("preprocess").d("Found hook class annotation: " + desc + " in class " + (entity != null ? entity.name : "unknown"));
         }
     }
 }

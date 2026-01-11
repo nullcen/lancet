@@ -22,13 +22,15 @@ public class ClassCollector {
 
     ClassReader mClassReader;
     Graph graph;
+    private final ClassLoader classLoader;
 
     // simple name of innerClass
     Map<String, ClassWriter> mClassWriters = new HashMap<>();
 
-    public ClassCollector(ClassReader mClassReader, Graph graph) {
+    public ClassCollector(ClassReader mClassReader, Graph graph, ClassLoader classLoader) {
         this.mClassReader = mClassReader;
         this.graph = graph;
+        this.classLoader = classLoader;
     }
 
     void setOriginClassName(String originClassName) {
@@ -37,7 +39,10 @@ public class ClassCollector {
 
     public ClassVisitor getOriginClassVisitor() {
         if(originClassWriter ==null){
-            originClassWriter = new ClassWriter(mClassReader, 0);
+            // Temporarily disable COMPUTE_FRAMES to avoid Frame calculation issues
+            // TODO: Re-enable COMPUTE_FRAMES once Frame calculation issues are resolved
+            originClassWriter = new LancetClassWriter(mClassReader,
+                    ClassWriter.COMPUTE_MAXS, classLoader);
         }
         return originClassWriter;
     }
@@ -45,7 +50,9 @@ public class ClassCollector {
     public ClassVisitor getInnerClassVisitor(String classSimpleName) {
         ClassWriter writer = mClassWriters.get(classSimpleName);
         if (writer == null) {
-            writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+            // Temporarily disable COMPUTE_FRAMES to avoid Frame calculation issues
+            // TODO: Re-enable COMPUTE_FRAMES once Frame calculation issues are resolved
+            writer = new LancetClassWriter(ClassWriter.COMPUTE_MAXS, classLoader);
             initForWriter(writer, classSimpleName);
             mClassWriters.put(classSimpleName, writer);
         }
@@ -79,5 +86,9 @@ public class ClassCollector {
 
     public String getCanonicalName(String simpleName) {
         return originClassName + "$" + simpleName;
+    }
+
+    public ClassLoader getClassLoader() {
+        return classLoader;
     }
 }

@@ -20,17 +20,19 @@ public class AsmWeaver implements Weaver {
      * @param graph
      * @return
      */
-    public static Weaver newInstance(TransformInfo transformInfo, Graph graph) {
-        return new AsmWeaver(transformInfo, graph);
+    public static Weaver newInstance(TransformInfo transformInfo, Graph graph, ClassLoader classLoader) {
+        return new AsmWeaver(transformInfo, graph, classLoader);
     }
 
     private final TransformInfo transformInfo;
     private final Graph graph;
+    private final ClassLoader classLoader;
 
-    private AsmWeaver(TransformInfo transformInfo, Graph graph) {
+    private AsmWeaver(TransformInfo transformInfo, Graph graph, ClassLoader classLoader) {
         Log.d(transformInfo.toString());
         this.graph = graph;
         this.transformInfo = transformInfo;
+        this.classLoader = classLoader;
     }
 
     /**
@@ -43,7 +45,7 @@ public class AsmWeaver implements Weaver {
         }
         String internalName = relativePath.substring(0, relativePath.lastIndexOf('.'));
         try {
-            return ClassTransform.weave(transformInfo, graph, input, internalName);
+            return ClassTransform.weave(transformInfo, graph, input, internalName, classLoader);
         }catch (RuntimeException e){
             Log.e("error in transform: " + relativePath, e);
             return new ClassData[]{new ClassData(input, internalName)};

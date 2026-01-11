@@ -9,6 +9,7 @@ import me.ele.lancet.weaver.internal.asm.classvisitor.ProxyClassVisitor;
 import me.ele.lancet.weaver.internal.asm.classvisitor.TryCatchInfoClassVisitor;
 import me.ele.lancet.weaver.internal.entity.TransformInfo;
 import me.ele.lancet.weaver.internal.graph.Graph;
+import me.ele.lancet.weaver.internal.log.Log;
 
 /**
  * Created by Jude on 2017/4/25.
@@ -18,8 +19,9 @@ public class ClassTransform {
 
     public static final String AID_INNER_CLASS_NAME = "_lancet";
 
-    public static ClassData[] weave(TransformInfo transformInfo, Graph graph, byte[] classByte, String internalName) {
-        ClassCollector classCollector = new ClassCollector(new ClassReader(classByte), graph);
+    public static ClassData[] weave(TransformInfo transformInfo, Graph graph, byte[] classByte, String internalName,
+                                    ClassLoader classLoader) {
+        ClassCollector classCollector = new ClassCollector(new ClassReader(classByte), graph, classLoader);
 
         classCollector.setOriginClassName(internalName);
 
@@ -58,6 +60,8 @@ public class ClassTransform {
 
     void startTransform() {
         mTailVisitor.setNextClassVisitor(mClassCollector.getOriginClassVisitor());
+        // Temporarily disable EXPAND_FRAMES to avoid Frame calculation issues
+        // TODO: Re-enable EXPAND_FRAMES once Frame calculation issues are resolved
         mClassCollector.mClassReader.accept(mHeadVisitor, 0);
     }
 }

@@ -136,6 +136,7 @@ public class PreClassAnalysis {
                 if (result.isHookClass) {
                     synchronized (this) {
                         hookClasses.add(result.entity.name);
+                        Log.tag("preprocess").i("Found hook class: " + result.entity.name + " from " + relativePath);
                         if (content instanceof JarInput) {
                             jarPathOfHookClasses.add(content.getFile().getAbsolutePath());
                         } else {

@@ -1,20 +1,16 @@
 package me.ele.lancet.plugin.internal;
 
 import com.android.build.api.transform.DirectoryInput;
-import com.android.build.api.transform.Format;
 import com.android.build.api.transform.JarInput;
-import com.android.build.api.transform.QualifiedContent;
-import com.android.build.api.transform.TransformInvocation;
-
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
 import me.ele.lancet.weaver.internal.graph.Graph;
-import me.ele.lancet.weaver.internal.log.Log;
 
 /**
  * Created by gengwanpeng on 17/4/26.
@@ -24,57 +20,52 @@ import me.ele.lancet.weaver.internal.log.Log;
  */
 public class TransformContext {
 
-    private TransformInvocation invocation;
+    private final boolean incremental;
+    private final File outputFile;
+    private final Collection<JarInput> allJars;
+    private final Collection<JarInput> addedJars;
+    private final Collection<JarInput> removedJars;
+    private final Collection<JarInput> changedJars;
+    private final Collection<DirectoryInput> allDirs;
 
-    private Collection<JarInput> allJars;
-    private Collection<JarInput> addedJars;
-    private Collection<JarInput> removedJars;
-    private Collection<JarInput> changedJars;
-    private Collection<DirectoryInput> allDirs;
-
-    private GlobalContext global;
+    private final GlobalContext global;
     private List<String> hookClasses;
     private Graph graph;
 
-    public TransformContext(TransformInvocation invocation, GlobalContext global) {
+    public TransformContext(Collection<JarInput> jarInputs, Collection<DirectoryInput> directoryInputs, boolean incremental,
+                            File outputFile, GlobalContext global) {
         this.global = global;
-        this.invocation = invocation;
-        init();
-    }
+        this.incremental = incremental;
+        this.outputFile = outputFile;
 
-    /**
-     * start collect.
-     */
-    private void init() {
-        allJars = new ArrayList<>(invocation.getInputs().size());
-        addedJars = new ArrayList<>(invocation.getInputs().size());
-        changedJars = new ArrayList<>(invocation.getInputs().size());
-        removedJars = new ArrayList<>(invocation.getInputs().size());
-        allDirs = new ArrayList<>(invocation.getInputs().size());
-        invocation.getInputs().forEach(it -> {
-            Log.d(it.toString());
-            it.getJarInputs().forEach(j -> {
-                allJars.add(j);
-                if (invocation.isIncremental()) {
-                    switch (j.getStatus()) {
-                        case ADDED:
-                            addedJars.add(j);
-                            break;
-                        case REMOVED:
-                            removedJars.add(j);
-                            break;
-                        case CHANGED:
-                            changedJars.add(j);
-                    }
+        this.allJars = new ArrayList<>(jarInputs);
+        this.addedJars = new ArrayList<>(jarInputs.size());
+        this.changedJars = new ArrayList<>(jarInputs.size());
+        this.removedJars = new ArrayList<>(jarInputs.size());
+        this.allDirs = new ArrayList<>(directoryInputs);
+
+        if (incremental) {
+            jarInputs.forEach(j -> {
+                switch (j.getStatus()) {
+                    case ADDED:
+                        addedJars.add(j);
+                        break;
+                    case REMOVED:
+                        removedJars.add(j);
+                        break;
+                    case CHANGED:
+                        changedJars.add(j);
+                        break;
+                    default:
+                        break;
                 }
             });
-            allDirs.addAll(it.getDirectoryInputs());
-        });
+        }
     }
 
 
     public boolean isIncremental() {
-        return invocation.isIncremental();
+        return incremental;
     }
 
     public Collection<JarInput> getAllJars() {
@@ -97,13 +88,14 @@ public class TransformContext {
         return Collections.unmodifiableCollection(removedJars);
     }
 
-    public File getRelativeFile(QualifiedContent content) {
-        return invocation.getOutputProvider().getContentLocation(content.getName(), content.getContentTypes(), content.getScopes(),
-                (content instanceof JarInput ? Format.JAR : Format.DIRECTORY));
+    public File getOutputFile() {
+        return outputFile;
     }
 
     public void clear() throws IOException {
-        invocation.getOutputProvider().deleteAll();
+        if (outputFile != null) {
+            Files.deleteIfExists(outputFile.toPath());
+        }
     }
 
     public GlobalContext getGlobal() {

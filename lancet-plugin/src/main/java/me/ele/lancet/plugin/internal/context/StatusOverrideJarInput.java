@@ -8,21 +8,17 @@ import com.google.common.hash.Hashing;
 import java.io.File;
 import java.util.Set;
 
-import me.ele.lancet.plugin.internal.TransformContext;
-
 /**
  * Created by Jude on 2017/7/14.
  */
 
 public class StatusOverrideJarInput implements JarInput {
-    private JarInput jarInput;
-    private File jar ;
-    private Status status;
+    private final JarInput jarInput;
+    private final Status status;
 
 
-    public StatusOverrideJarInput(TransformContext context, JarInput jarInput,Status status) {
+    public StatusOverrideJarInput(JarInput jarInput, Status status) {
         this.jarInput = jarInput;
-        this.jar = context.getRelativeFile(jarInput);
         this.status = status;
     }
 
@@ -33,12 +29,12 @@ public class StatusOverrideJarInput implements JarInput {
 
     @Override
     public String getName() {
-        return Hashing.sha1().hashString(jar.getPath()+status, Charsets.UTF_16LE).toString();
+        return Hashing.sha1().hashString(jarInput.getFile().getPath() + status, Charsets.UTF_16LE).toString();
     }
 
     @Override
     public File getFile() {
-        return jar;
+        return jarInput.getFile();
     }
 
     @Override
