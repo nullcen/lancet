@@ -2,49 +2,64 @@
 
 [Chinese README](README_zh.md)
 
-> Forked from [eleme/lancet](https://github.com/eleme/lancet), adapted for Android Gradle Plugin 8.x.
+> Forked from [AndrewTseZhou/lancet](https://github.com/AndrewTseZhou/lancet), which itself is a fork of [eleme/lancet](https://github.com/eleme/lancet).
+>
+> This fork republishes the AGP8-compatible build to JitPack for easy dependency management.
+
+## What changed from the original Lancet
+
+The original `eleme/lancet` uses the legacy `BaseExtension.registerTransform()` API, which was **removed in AGP 8.0**. This fork (originally adapted by AndrewTseZhou, republished here) migrates to the modern Artifacts API:
+
+- Replaced `LancetTransform` (legacy Transform API) with `LancetTransformTask`, registered via `AndroidComponentsExtension.onVariants()` + `ScopedArtifacts.Scope.ALL` to transform classes.
+- Upgraded ASM to 9.6, Guava to 32.1.3-jre, and Android tools to 8.x.
+- Java 17 source compatibility.
 
 Lancet is a lightweight AOP framework for Android.
 
-It's fast and just take up a little time during compiling. Also, it supports incremental compiling.
++ Fast compilation with incremental build support.
++ Concise API — a few lines of Java to complete injection.
++ No runtime jar inserted into apk.
++ Usable from SDKs to modify dependent Apps.
 
-But it provides great api to help you coding in Android.
+## Installation
 
-It takes no runtime jar.
+### 1. Add JitPack repository and plugin classpath
 
-In addition, not only App developers but also SDK developers can use Lancet.
-
-## Usage
-### Installation
-
-Firstly, add following code in root **build.gradle** of your project.
+In your root `build.gradle`:
 
 ```groovy
-dependencies {
-    classpath 'com.android.tools.build:gradle:3.3.2'
-    classpath 'me.ele:lancet-plugin:1.0.6'
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+        maven { url "https://jitpack.io" }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.4'
+        classpath 'com.github.nullcen:lancet-plugin:1.0.7'
+    }
 }
 ```
-Tips: Lancet 1.0.5 and above only supports gradle 3.3.2 and above.
 
-And then, add following code in your **application module's build.gradle**
+### 2. Apply plugin and add lancet-base
+
+In your application module's `build.gradle`:
 
 ```groovy
 apply plugin: 'me.ele.lancet'
 
 dependencies {
-    provided 'me.ele:lancet-base:1.0.6'
+    compileOnly 'com.github.nullcen:lancet-base:1.0.7'
 }
 ```
 
-That's OK.Now you can follow our tutorial to learn how to use it.
+That's it. Now you can follow the tutorial below to learn how to use it.
 
 ### Tutorial
 
-Lancet use annotation to indicate where to cut the code and focus on interacting with origin class's methods and fields;
+Lancet uses annotations to specify where to weave code, focusing on interacting with origin class methods and fields.
 
-Firstly, let's see a example.
-Look at the following code:
+A quick example:
 
 ```java
 @Proxy("i")
@@ -55,71 +70,62 @@ public static int anyName(String tag, String msg){
 }
 ```
 
-There are some key points: 
+Key points:
 
-* ```@TargetClass``` directly locate the target ```android.util.Log```
-* ```@Proxy```locate the method name```i```
-* ```Origin.call()``` will be replaced by```Log.i()``` as we explained above
-* so the influence is every ```Log.i```'s second parameter```msg``` will has a trailing **"lancet"**
-
+* `@TargetClass` locates the target `android.util.Log`
+* `@Proxy` locates the method name `i`
+* `Origin.call()` will be replaced by `Log.i()` as explained above
+* The effect: every `Log.i`'s second parameter `msg` will have a trailing **"lancet"**
 
 ### Choose target class
 
 ```java
 public @interface TargetClass {
     String value();
-
     Scope scope() default Scope.SELF;
 }
 
 public @interface ImplementedInterface {
-
     String[] value();
-
     Scope scope() default Scope.SELF;
 }
 
 public enum Scope {
-
     SELF,
     DIRECT,
     ALL,
     LEAF
 }
 ```
-We use the three classes above to locate our targets.
 
 #### @TargetClass
 
- 1. **value** in ```@TargetClass``` should be a full class name.
- 2. Scope.SELF means the target is the class named by **value**
- 3. Scope.DIRECT locate the direct subclasses of **value**
- 4. Scope.All indicates the all subclasses of **value**
- 5. The Scope.LEAF is a little bit special, it means all leaf subclasses of **value**.For example: ```A <- B <- C, B <- D```, the leaf children of A are C and D.
+1. **value** in `@TargetClass` should be a full class name.
+2. `Scope.SELF` means the target is the class named by **value**.
+3. `Scope.DIRECT` locates the direct subclasses of **value**.
+4. `Scope.ALL` indicates all subclasses of **value**.
+5. `Scope.LEAF` means all leaf subclasses of **value**. For example: `A <- B <- C, B <- D`, the leaf children of A are C and D.
 
 #### @ImplementedInterface
 
-1. **value** in ```@ImplementedInterface``` is a string array filled with full interface names and classes that satisfied all conditions will be chosen.
-2. Scope.SELF : all classes implements interfaces **literally**
-3. Scope.DIRECT : all classes implements interfaces or their children interfaces **literally**
-4. Scope.ALL: all classes included in *Scope.DIRECT* and their childrens
-5. Scope.LEAF: all classes in *Scope.ALL* with no children.
-
-Let's see a illustration.
+1. **value** is a string array of full interface names; classes satisfying all conditions are chosen.
+2. `Scope.SELF`: all classes implementing interfaces **literally**.
+3. `Scope.DIRECT`: all classes implementing interfaces or their child interfaces **literally**.
+4. `Scope.ALL`: all classes in *Scope.DIRECT* and their subclasses.
+5. `Scope.LEAF`: all classes in *Scope.ALL* with no children.
 
 ![scope](media/14948409810841/scope.png)
 
-When we use```@ImplementedInterface(value = "I", scope = ...)```, the targets are:
+When using `@ImplementedInterface(value = "I", scope = ...)`, targets are:
 
 * Scope.SELF -> A
 * Scope.DIRECT -> A C
 * Scope.ALL -> A B C D
 * Scope.LEAF -> B D
 
-
 ### Choose target method
 
-#### Choose method name
+#### @Proxy and @Insert
 
 ```java
 public @interface Insert {
@@ -130,55 +136,17 @@ public @interface Insert {
 public @interface Proxy {
     String value();
 }
-
-public @interface TryCatchHandler {
-}
-
-public @interface NameRegex {
-    String value();
-}
-
 ```
 
-##### @TryCatchHandler
+1. **value** in `@Proxy` and `@Insert` is the target method name.
+2. `@Proxy` hooks every invoke point of the target method.
+3. `@Insert` hooks the code inside the method body.
+4. `@Proxy` can be combined with `@NameRegex` to control scope; `@Insert` cannot.
+5. ROM classes can't be touched at compile time, so `@Insert` won't work on them — but `@Proxy` can intercept all call sites.
 
-This annotation is easy.
-
-```java
-@TryCatchHandler
-@NameRegex("(?!me/ele/).*")
-    public static Throwable catches(Throwable t){
-        return t;
-    }
-```
-
-As the code above, it hook every try catch handle, you can deal with and return. And the control flow will jump to it's origin space.
-
-But with the ```@NameRegex```, something is different.
-
-##### @NameRegex
-
-@NameRegex is used to restrict hook method by match the class name.Be caution, the *dot* in class name will be replaced by *slash*.
-
-String value in @NameRegex will be compiled to pattern. the hook method only works if the pattern matches the class name where appear the cut point.
-
-Such as the above example, every class will be ignored if it's package name start with "me.ele.";
-
-@NameRegex can only be used with @Proxy or @TryCatchHandler.
-
-##### @Proxy and @Insert
-
-1. **Value** in ```@Proxy``` and ```@Insert``` is the target method name.
-2. ```@Proxy``` means to hook every invoke point of the target method.
-
-3. ```@Insert``` means to hook the code inside the method.
-4. In another word, if you use @Insert to hook a method, the running code in the target method will be changed.But ```@Proxy``` can control the scope by using it combined with ```@NameRegex```.
-5. Another different is, classes in Android's ROM can't be touched as compiling time.So we can't use @Insert if we want to change the behavior of ROM's classes, but @Proxy can do it.
-
-@Insert has a special boolean parameter is ```mayCreateSuper```.Let's see a example.
+`@Insert` has a `mayCreateSuper` parameter:
 
 ```java
-
 @TargetClass(value = "android.support.v7.app.AppCompatActivity", scope = Scope.LEAF)
 @Insert(value = "onStop", mayCreateSuper = true)
 protected void onStop(){
@@ -187,10 +155,7 @@ protected void onStop(){
 }
 ```
 
-The goal method of the hook method is 
-every leaf child of AppcompatActivity ```void onStop()```.
-
-If a class ```MyActivity extends AppcompatActivity```do not override the onStop method, we will create a method for ```MyActivity``` like this:
+If `MyActivity extends AppCompatActivity` doesn't override `onStop`, Lancet creates:
 
 ```java
 protected void onStop() {
@@ -198,47 +163,39 @@ protected void onStop() {
 }
 ```
 
-And then hook the method.
+then hooks it.
 
-If you open the flag, it will always create the method if target class has no matched method no matter it has the super method or doesn't.
+#### @TryCatchHandler
 
-And the public/protected/private flag is inherited from above hook method.This is the flag's only use.
+```java
+@TryCatchHandler
+@NameRegex("(?!me/ele/).*")
+public static Throwable catches(Throwable t){
+    return t;
+}
+```
 
-Also be care that 
+Hooks every try-catch handler. `@NameRegex` restricts by class name pattern.
 
-#### Choose method descriptor
+#### @NameRegex
 
-The example shown at first also indicates a important rule which is the strict match.The ```Log.i``` 's full descriptor is **"int Log.i(String, String)"**, more precisely "**"(Ljava/lang/String;Ljava/lang/String;)I"**". 
+Used with `@Proxy` or `@TryCatchHandler` to filter by class name (dots replaced by slashes). Only matches get hooked.
 
-It means our hook method should have the same method descriptor and static flag with target method.
+#### Method descriptor matching
 
-It doesn't matter if you don't known method descriptor. You can have a look at [JVM Specification Chapter 4.3](https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.3) if interested.
-
-We doesn't care if parameters' generic type are the same or not.In another word, we don't care signature of method, only descriptor.
-
-Also, exceptions declaration is also ignorable.You can write them for convenience.
-
-Any other access flag will be ignored except private/protected/public/static that we said above.
+The hook method must have the same descriptor and static flag as the target. Generic types and exception declarations are ignored.
 
 ##### @ClassOf
 
-Sometimes, we can't directly declare a class that we can't touch as parameter of our hook method.
-
-we can use ```@ClassOf``` to do this job.
-
-Take a look at the following example:
+When you can't directly reference a parameter type:
 
 ```java
 public class A {
     protected int execute(B b){
         return b.call();
     }
-
     private class B {
-
-        int call() {
-            return 0;
-        }
+        int call() { return 0; }
     }
 }
 
@@ -250,40 +207,18 @@ public int hookExecute(@ClassOf("com.dieyidezui.demo.A$B") Object o) {
 }
 ```
 
-We use ```@ClassOf```to locate the parameter's actual type.
-
-And the parameter declared in method should be it's super class, such as ```java.lang.Object```;
-
-value in @ClassOf should be in the form of **"(package_name.)(outer_class_name$)class_name([]...)"**, such as:
-* java.lang.Object
-* java.lang.Integer[][]
-* A[]
-* A$B
-
-if no ```@ClassOf```, the hook method's descriptor is **"(Ljava/lang/Object;)I"**. But now it is **"(Lcom/dieyidezui/demo/A$B;)I"**.
-
-So the ```hookExecute``` method can match ```A.execute```.
+`@ClassOf` value format: `(package_name.)(outer_class_name$)class_name([]...)`, e.g. `java.lang.Object`, `java.lang.Integer[][]`, `A$B`.
 
 ### API
 
-Till now, we have two classes to use, they are ```Origin``` and ```This```.
-
 #### Origin
 
-```Origin``` is used to call original method.
-You can invoke its method zero or one more times if you like.
+Calls the original method. Can be invoked multiple times.
 
-##### Origin.call/callThrowOne/callThrowTwo/callThrowThree()
-This group API is used for call the original method which has return value.
-You should cast it to original type that the same with hook method descriptor's return type.
+- `Origin.call()` / `callThrowOne/Two/Three()` — for methods with return value.
+- `Origin.callVoid()` / `callVoidThrowOne/Two/Three()` — for void methods.
 
-##### Origin.callVoid/callVoidThrowOne/callVoidThrowTwo/callVoidThrowThree()
-
-Similar with above three methods, these methods are used for method without return value.
-
-By the way, the ```ThrowOne/ThrowTwo/ThrowThree``` are for deceiving the compiler if you want to catch some exceptions for some convenience.
-
-For example:
+`ThrowOne/Two/Three` are for deceiving the compiler to catch specific exceptions:
 
 ```java
 @TargetClass("java.io.InputStream")
@@ -298,42 +233,19 @@ public int read(byte[] bytes) throws IOException {
 }
 ```
 
-So that on every invoke point of ```int InputStream.read(byte[])```, if ```IOException``` happens, we will see its stacktrace. 
-
 #### This
 
-##### get()
+For non-static `@Insert` hooks only.
 
-This method is used for none static method to find this object.
-You can cast it to its actual type.
-
-###### putField(Object, String) / getField(String)
-
-You can directly get or put a field in the target class even if the field is protected or private!
-
-What's more! If the field name is not exists, we will create it for you!
-
-Auto box and unbox are also supported.
-
-Also, we have some restricts:
-
-* These two methods only are only allowed to use with ```@Insert``` till now.
-* You can't retrieve it's field of super class. When you try to get or put a field that it's super class has. We still will create the field for you. If the field of super class is private, it's OK. Otherwise, you will get a error at runtime.
-
-For example:
+- `This.get()` — returns the target instance.
+- `This.putField(Object, String)` / `This.getField(String)` — get/set any field (even private). Auto-creates if not exists.
 
 ```java
 package me.ele;
 public class Main {
     private int a = 1;
-
-    public void nothing(){
-
-    }
-
-    public int getA(){
-        return a;
-    }
+    public void nothing(){}
+    public int getA(){ return a; }
 }
 
 @TargetClass("me.ele.Main")
@@ -343,28 +255,28 @@ public void testThis() {
     This.putField(3, "a");
     Origin.callVoid();
 }
-
 ```
 
-Then we run the following codes:
-
-```java
-Main main = new Main();
-main.nothing();
-Log.e("debug", "a = " + main.getA());
-```
-
-We will see:
-
+Result:
 ```
 E/debug: me.ele.Main
 E/debug: a = 3
 ```
 
+Restrictions:
+* `This` cannot be used with `@Proxy`.
+* Cannot access superclass fields — a new field will be created instead.
+
 ## Tips
-1. Inner classes should be named like  ```package.outer_class$inner_class```
-2. SDK developer needn't to apply plugin, just ```provided me.ele:lancet-base:x.y.z```
-3. Although we support incremental compilation. But when you use ```Scope.LEAF、Scope.ALL``` or edit the hook class, the incremental judgement will be a little special. It may cause full compilation.
+1. Inner classes should be named `package.outer_class$inner_class`.
+2. SDK developers don't need to apply the plugin, just `compileOnly 'com.github.nullcen:lancet-base:1.0.7'`.
+3. Incremental compilation is supported, but `Scope.LEAF` / `Scope.ALL` or hook class edits may trigger full compilation.
+
+## Credits
+
+- Original project: [eleme/lancet](https://github.com/eleme/lancet)
+- AGP8 adaptation: [AndrewTseZhou/lancet](https://github.com/AndrewTseZhou/lancet)
+- JitPack republish: [nullcen/lancet](https://github.com/nullcen/lancet)
 
 ## License
 
@@ -379,10 +291,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
-
-
-
-
-
-

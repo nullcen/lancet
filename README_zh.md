@@ -1,41 +1,63 @@
 # Lancet (AGP8)
 
-> Fork 自 [eleme/lancet](https://github.com/eleme/lancet)，适配了 Android Gradle Plugin 8.x。
+> Fork 自 [AndrewTseZhou/lancet](https://github.com/AndrewTseZhou/lancet)，其本身 fork 自 [eleme/lancet](https://github.com/eleme/lancet)。
+>
+> 本仓库将 AGP8 兼容版本重新发布到 JitPack，方便通过 Maven 依赖使用。
 
-Lancet 是一个轻量级Android AOP框架。
+## 与原版 Lancet 的区别
 
-+ 编译速度快, 并且支持增量编译.
-+ 简洁的 API, 几行 Java 代码完成注入需求.
-+ 没有任何多余代码插入 apk.
-+ 支持用于 SDK, 可以在SDK编写注入代码来修改依赖SDK的App.
+原版 `eleme/lancet` 使用旧的 `BaseExtension.registerTransform()` API，该 API 在 **AGP 8.0 中已被移除**。本 fork（最初由 AndrewTseZhou 适配，此处重新发布）迁移到了新的 Artifacts API：
 
-## 开始使用
-### 安装
+- 用 `LancetTransformTask` 替代了 `LancetTransform`（旧 Transform API），通过 `AndroidComponentsExtension.onVariants()` + `ScopedArtifacts.Scope.ALL` 注册类转换。
+- ASM 升级到 9.6，Guava 升级到 32.1.3-jre，Android tools 升级到 8.x。
+- Java 17 源码兼容。
 
-在根目录的 `build.gradle` 添加:
+Lancet 是一个轻量级 Android AOP 框架。
+
++ 编译速度快，并且支持增量编译。
++ 简洁的 API，几行 Java 代码完成注入需求。
++ 没有任何多余代码插入 apk。
++ 支持用于 SDK，可以在 SDK 编写注入代码来修改依赖 SDK 的 App。
+
+## 接入方式
+
+### 1. 添加 JitPack 仓库和插件 classpath
+
+在根目录 `build.gradle` 中：
+
 ```groovy
-dependencies {
-    classpath 'com.android.tools.build:gradle:3.3.2'
-    classpath 'me.ele:lancet-plugin:1.0.6'
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+        maven { url "https://jitpack.io" }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.4'
+        classpath 'com.github.nullcen:lancet-plugin:1.0.7'
+    }
 }
 ```
-注意: Lancet 1.0.5 及以上版本只支持 gradle 3.3.2 及以上版本。
 
-在 app 目录的'build.gradle' 添加：
+### 2. 应用插件并添加 lancet-base
+
+在 app 模块的 `build.gradle` 中：
+
 ```groovy
 apply plugin: 'me.ele.lancet'
 
 dependencies {
-    provided 'me.ele:lancet-base:1.0.6'
+    compileOnly 'com.github.nullcen:lancet-base:1.0.7'
 }
 ```
 
+完成，接下来可以按照下面的教程使用。
+
+## 使用说明
 
 ### 示例
 
 Lancet 使用注解来指定代码织入的规则与位置。
-
-首先看看基础API使用:
 
 ```java
 @Proxy("i")
@@ -46,48 +68,84 @@ public static int anyName(String tag, String msg){
 }
 ```
 
-这里有几个关键点:
+关键点：
 
-* ```@TargetClass``` 指定了将要被织入代码目标类 ```android.util.Log```.
-* ```@Proxy``` 指定了将要被织入代码目标方法 ```i```.
-* 织入方式为`Proxy`(将在后面介绍).
-* ```Origin.call()``` 代表了 ```Log.i()``` 这个目标方法.
+* `@TargetClass` 指定目标类 `android.util.Log`
+* `@Proxy` 指定目标方法 `i`
+* `Origin.call()` 代表原始的 `Log.i()` 方法
+* 效果：代码中所有 `Log.i(tag, msg)` 的第二个参数都会加上 **"lancet"** 后缀
 
-所以这个示例Hook方法的作用就是 将代码里出现的所有 ```Log.i(tag,msg)``` 代码替换为```Log.i(tag,msg + "lancet")```
+### 匹配目标类
 
-### 代码织入方式
+```java
+public @interface TargetClass {
+    String value();
+    Scope scope() default Scope.SELF;
+}
 
-#### @Proxy 
+public @interface ImplementedInterface {
+    String[] value();
+    Scope scope() default Scope.SELF;
+}
+
+public enum Scope {
+    SELF, DIRECT, ALL, LEAF
+}
+```
+
+#### @TargetClass
+
+1. `value` 是类的全限定名。
+2. `Scope.SELF`：仅匹配 `value` 指定的类。
+3. `Scope.DIRECT`：匹配 `value` 的直接子类。
+4. `Scope.ALL`：匹配 `value` 的所有子类。
+5. `Scope.LEAF`：匹配 `value` 的所有最终子类（叶子节点）。
+
+#### @ImplementedInterface
+
+1. `value` 可填多个接口全名。
+2. `Scope.SELF`：直接实现所有指定接口的类。
+3. `Scope.DIRECT`：直接实现指定接口及其子接口的类。
+4. `Scope.ALL`：`Scope.DIRECT` 中的类及其所有子类。
+5. `Scope.LEAF`：`Scope.ALL` 中的所有叶子节点。
+
+![scope](media/14948409810841/scope.png)
+
+使用 `@ImplementedInterface(value = "I", scope = ...)` 时，目标类为：
+
+* Scope.SELF -> A
+* Scope.DIRECT -> A C
+* Scope.ALL -> A B C D
+* Scope.LEAF -> B D
+
+### 匹配目标方法
+
+#### @Proxy
+
 ```java
 public @interface Proxy {
     String value();
 }
 ```
 
-`@Proxy` 将使用新的方法**替换**代码里存在的原有的目标方法.   
-比如代码里有10个地方调用了 `Dog.bark()`, 代理这个方法后，所有的10个地方的代码会变为`_Lancet.xxxx.bark()`. 而在这个新方法中会执行你在Hook方法中所写的代码.  
-`@Proxy` 通常用于对系统 API 的劫持。因为虽然我们不能注入代码到系统提供的库之中，但我们可以劫持掉所有调用系统API的地方。  
+`@Proxy` 替换代码中所有对目标方法的调用。比如代码里有 10 处调用了 `Dog.bark()`，代理后所有 10 处都会变为 `_Lancet.xxxx.bark()`。
 
-##### @NameRegex
-@NameRegex 用来限制范围操作的作用域. 仅用于`Proxy`模式中, 比如你只想代理掉某一个包名下所有的目标操作. 或者你在代理所有的网络请求时，不想代理掉自己发起的请求. 使用`NameRegex`对 `TargetClass` , `ImplementedInterface` 筛选出的class再进行一次匹配. 
+通常用于系统 API 的劫持——虽然不能注入代码到系统库中，但可以劫持所有调用系统 API 的地方。
 
+#### @Insert
 
-
-#### @Insert 
-``` java
+```java
 public @interface Insert {
     String value();
     boolean mayCreateSuper() default false;
 }
 ```
 
-`@Insert` 将新代码插入到目标方法原有代码前后。  
-`@Insert` 常用于操作App与library的类，并且可以通过`This`操作目标类的私有属性与方法(下文将会介绍)。  
-`@Insert` 当目标方法不存在时，还可以使用`mayCreateSuper`参数来创建目标方法。  
-比如下面将代码注入每一个Activity的`onStop`生命周期  
+`@Insert` 将新代码插入到目标方法原有代码前后。常用于操作 App 与 library 的类，可通过 `This` 操作目标类的私有属性。
+
+`mayCreateSuper`：当目标方法不存在时自动创建。
 
 ```java
-
 @TargetClass(value = "android.support.v7.app.AppCompatActivity", scope = Scope.LEAF)
 @Insert(value = "onStop", mayCreateSuper = true)
 protected void onStop(){
@@ -96,8 +154,7 @@ protected void onStop(){
 }
 ```
 
-`Scope` 将在后文介绍，这里的意为目标是 `AppCompatActivity` 的所有最终子类。  
-如果一个类 `MyActivity extends AppcompatActivity` 没有重写 `onStop` 会自动创建`onStop`方法，而`Origin`在这里就代表了`super.onStop()`, 最后就是这样的效果：
+如果 `MyActivity` 没有重写 `onStop`，会自动创建：
 
 ```java
 protected void onStop() {
@@ -106,85 +163,36 @@ protected void onStop() {
 }
 ```
 
-Note：public/protected/private 修饰符会完全照搬 Hook 方法的修饰符。
+注意：public/protected/private 修饰符会完全照搬 Hook 方法。
 
-
-### 匹配目标类
+#### @TryCatchHandler
 
 ```java
-public @interface TargetClass {
-    String value();
-
-    Scope scope() default Scope.SELF;
-}
-
-public @interface ImplementedInterface {
-
-    String[] value();
-
-    Scope scope() default Scope.SELF;
-}
-
-public enum Scope {
-
-    SELF,
-    DIRECT,
-    ALL,
-    LEAF
+@TryCatchHandler
+@NameRegex("(?!me/ele/).*")
+public static Throwable catches(Throwable t){
+    return t;
 }
 ```
 
-很多情况，我们不会仅匹配一个类，会有注入某各类所有子类，或者实现某个接口的所有类等需求。所以通过 `TargetClass` , `ImplementedInterface` 2个注解及 `Scope` 进行目标类匹配。
+Hook 每一个 try-catch 块。`@NameRegex` 可按类名限制范围。
 
-#### @TargetClass
-通过类查找.
- 1. `@TargetClass` 的 `value` 是一个类的全称.
- 2. Scope.SELF 代表仅匹配 `value` 指定的目标类.
- 3. Scope.DIRECT 代表匹配 `value` 指定类的直接子类.
- 4. Scope.All 代表匹配 `value` 指定类的所有子类.
- 5. Scope.LEAF 代表匹配 `value` 指定类的最终子类.众所周知java是单继承，所以继承关系是树形结构，所以这里代表了指定类为顶点的继承树的所有叶子节点.
+#### @NameRegex
 
-#### @ImplementedInterface
-通过接口查找. 情况比通过类查找稍复杂一些.
-1. `@ImplementedInterface` 的 `value` 可以填写多个接口的全名.
-2. Scope.SELF : 代表直接实现所有指定接口的类.
-3. Scope.DIRECT : 代表直接实现所有指定接口，以及指定接口的子接口的类.
-4. Scope.ALL: 代表 `Scope.DIRECT` 指定的所有类及他们的所有子类.
-5. Scope.LEAF: 代表 `Scope.ALL` 指定的森林结构中的所有叶节点.
+仅用于 `@Proxy` 和 `@TryCatchHandler`，按类名正则过滤（包名中的 `.` 会替换为 `/`）。
 
-如下图：
-![scope](media/14948409810841/scope.png)
+#### 方法描述符匹配
 
-当我们使用`@ImplementedInterface(value = "I", scope = ...)`时, 目标类如下:
+Hook 方法必须与目标方法的描述符（参数类型、返回类型）和 static 标志一致。泛型类型和异常声明可忽略。
 
-* Scope.SELF -> A
-* Scope.DIRECT -> A C
-* Scope.ALL -> A B C D
-* Scope.LEAF -> B D
-
-
-### 匹配目标方法
-虽然在 `Proxy` , `Insert` 中我们指定了方法名, 但识别方法必须要更细致的信息. 我们会直接使用 Hook 方法的修饰符，参数类型来匹配方法.  
-所以一定要保持 Hook 方法的 `public/protected/private` `static` 信息与目标方法一致，参数类型，返回类型与目标方法一致.  
-返回类型可以用 Object 代替.  
-方法名不限. 异常声明也不限.  
-
-但有时候我们并没有权限声明目标类. 这时候怎么办？  
 ##### @ClassOf
-可以使用 `ClassOf` 注解来替代对类的直接 import.  
-比如下面这个例子：  
+
+当无法直接引用参数类型时使用：
+
 ```java
 public class A {
-    protected int execute(B b){
-        return b.call();
-    }
-
-    private class B {
-
-        int call() {
-            return 0;
-        }
-    }
+    protected int execute(B b){ return b.call(); }
+    private class B { int call() { return 0; } }
 }
 
 @TargetClass("com.dieyidezui.demo.A")
@@ -195,25 +203,18 @@ public int hookExecute(@ClassOf("com.dieyidezui.demo.A$B") Object o) {
 }
 ```
 
-`ClassOf` 的 value 一定要按照 <strong>`(package_name.)(outer_class_name$)inner_class_name([]...)`</strong>的模板.  
-比如:
-* java.lang.Object
-* java.lang.Integer[][]
-* A[]
-* A$B
+`@ClassOf` value 格式：`(package_name.)(outer_class_name$)class_name([]...)`，如 `java.lang.Object`、`A$B`。
 
 ### API
-我们可以通过 `Origin` 与 `This` 与目标类进行一些交互.  
 
 #### Origin
-`Origin` 用来调用原目标方法. 可以被多次调用.  
-`Origin.call()` 用来调用有返回值的方法.  
-`Origin.callVoid()` 用来调用没有返回值的方法.  
-另外，如果你有捕捉异常的需求.可以使用  
-`Origin.call/callThrowOne/callThrowTwo/callThrowThree()`
-`Origin.callVoid/callVoidThrowOne/callVoidThrowTwo/callVoidThrowThree()`
 
-For example:
+调用原目标方法，可多次调用。
+
+- `Origin.call()` / `callThrowOne/Two/Three()`：有返回值的方法。
+- `Origin.callVoid()` / `callVoidThrowOne/Two/Three()`：无返回值的方法。
+
+`ThrowOne/Two/Three` 用于欺骗编译器以捕获特定异常：
 
 ```java
 @TargetClass("java.io.InputStream")
@@ -228,36 +229,19 @@ public int read(byte[] bytes) throws IOException {
 }
 ```
 
-
 #### This
-仅用于`Insert` 方式的非静态方法的Hook中.(暂时)  
 
-##### get()
-返回目标方法被调用的实例化对象.  
+仅用于 `@Insert` 非静态方法。
 
-###### putField & getField
-你可以直接存取目标类的所有属性，无论是 `protected` or `private`.  
-另外，如果这个属性不存在，我们还会自动创建这个属性. Exciting!  
-自动装箱拆箱肯定也支持了.  
-
-一些已知的缺陷:  
-+ `Proxy` 不能使用 `This`
-+ 你不能存取你父类的属性. 当你尝试存取父类属性时，我们还是会创建新的属性.
-
-For example:
+- `This.get()`：返回目标实例。
+- `This.putField(Object, String)` / `This.getField(String)`：存取目标类任意属性（包括 private），不存在则自动创建。
 
 ```java
 package me.ele;
 public class Main {
     private int a = 1;
-
-    public void nothing(){
-
-    }
-
-    public int getA(){
-        return a;
-    }
+    public void nothing(){}
+    public int getA(){ return a; }
 }
 
 @TargetClass("me.ele.Main")
@@ -267,13 +251,28 @@ public void testThis() {
     This.putField(3, "a");
     Origin.callVoid();
 }
-
 ```
 
+结果：
+```
+E/debug: me.ele.Main
+E/debug: a = 3
+```
+
+限制：
+* `@Proxy` 不能使用 `This`。
+* 不能存取父类属性——会创建新属性。
+
 ## Tips
-1. 内部类应该命名为  ```package.outer_class$inner_class```  
-2. SDK 开发者不需要 `apply` 插件, 只需要 ```provided me.ele:lancet-base:x.y.z```  
-3. 尽管我们支持增量编译. 但当我们使用 ```Scope.LEAF、Scope.ALL``` 覆盖的类有变动 或者修改 Hook 类时, 本次编译将会变成全量编译.  
+1. 内部类命名为 `package.outer_class$inner_class`。
+2. SDK 开发者不需要 apply 插件，只需 `compileOnly 'com.github.nullcen:lancet-base:1.0.7'`。
+3. 支持增量编译，但使用 `Scope.LEAF` / `Scope.ALL` 覆盖的类有变动或修改 Hook 类时，会触发全量编译。
+
+## 致谢
+
+- 原始项目：[eleme/lancet](https://github.com/eleme/lancet)
+- AGP8 适配：[AndrewTseZhou/lancet](https://github.com/AndrewTseZhou/lancet)
+- JitPack 重新发布：[nullcen/lancet](https://github.com/nullcen/lancet)
 
 ## License
 
@@ -288,10 +287,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
-
-
-
-
-
-
