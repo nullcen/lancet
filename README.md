@@ -1,6 +1,8 @@
-# Lancet
+# Lancet (AGP8)
 
 [Chinese README](README_zh.md)
+
+> Forked from [eleme/lancet](https://github.com/eleme/lancet), adapted for Android Gradle Plugin 8.x.
 
 Lancet is a lightweight AOP framework for Android.
 

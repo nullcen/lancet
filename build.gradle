@@ -3,16 +3,19 @@ apply plugin: 'base'
 buildscript {
     ext {
         Properties properties = new Properties()
-        properties.load(project.rootProject.file('local.properties').newDataInputStream())
+        def localPropsFile = project.rootProject.file('local.properties')
+        if (localPropsFile.exists()) {
+            properties.load(localPropsFile.newDataInputStream())
+        }
 
-        ele = true
+        ele = false
         ele = "true" == properties.getProperty("ele")
 
         if (!ele) {
             bintrayUser = properties.getProperty('bintrayUser')
             bintrayKey = properties.getProperty('bintrayKey')
         }
-        lancet_group = 'me.ele'
+        lancet_group = 'com.github.nullcen'
         lancet_version = '1.0.7'
         //lancet_version = '0.0.1.8-SNAPSHOT'
 

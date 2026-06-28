@@ -1,4 +1,6 @@
-# Lancet
+# Lancet (AGP8)
+
+> Fork 自 [eleme/lancet](https://github.com/eleme/lancet)，适配了 Android Gradle Plugin 8.x。
 
 Lancet 是一个轻量级Android AOP框架。
 
